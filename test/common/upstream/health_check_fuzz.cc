@@ -87,6 +87,7 @@ void HealthCheckFuzz::raiseEvent(test::common::upstream::RaiseEvent event, bool 
       ENVOY_LOG_MISC(trace, "Creating client and stream from close event.");
       expectClientCreate(index);
       expectStreamCreate(index);
+      test_sessions_[index]->interval_timer_->invokeCallback();
     }
     break;
   }
