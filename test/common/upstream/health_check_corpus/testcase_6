@@ -6,7 +6,7 @@ health_check_config {
         seconds: 1
     }
     no_traffic_interval {
-        seconds: 1
+        seconds: 5
     }
     interval_jitter {
         seconds: 1
@@ -32,18 +32,16 @@ actions {
                     key: ":status"
                     value: "200"
                 }
-                headers {
-                    key: "x-envoy-degraded"
-                    value: "1"
-                }
             }
             status: "200"
         }
     }
 }
 actions {
-    stream_create {
+    raise_event {
+        remote_close {
 
+        }
     }
 }
 actions {
@@ -59,4 +57,3 @@ actions {
         }
     }
 }
-create_second_host : false

@@ -73,5 +73,6 @@ void HttpHealthCheckerImplTestBase::expectClientCreate(size_t index) {
   expectClientCreate(index, health_checker_map_);
 }
 
+
 } // namespace Upstream
 } // namespace Envoy
