@@ -18,7 +18,13 @@ void HealthCheckFuzz::allocHealthCheckerFromProto(
 
 void HealthCheckFuzz::initializeAndReplay(test::common::upstream::HealthCheckTestCase input) {
   second_host_ = false;
-  allocHealthCheckerFromProto(input.health_check_config());
+  recieved_response_and_no_new_stream_ = false;
+  try {
+    allocHealthCheckerFromProto(input.health_check_config());
+  } catch (EnvoyException& e) {
+    ENVOY_LOG_MISC(debug, "EnvoyException: {}", e.what());
+    return;
+  }
   ON_CALL(runtime_.snapshot_, featureEnabled("health_check.verify_cluster", 100))
       .WillByDefault(testing::Return(input.http_verify_cluster()));
   cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
@@ -64,7 +70,11 @@ void HealthCheckFuzz::respondHttp(test::fuzz::Headers headers, absl::string_view
 void HealthCheckFuzz::triggerIntervalTimer(bool second_host) {
   const int index = (second_host_ && second_host) ? 1 : 0;
   ENVOY_LOG_MISC(trace, "Triggered interval timer on host {}", index);
-  expectStreamCreate(index);
+  if (recieved_response_and_no_new_stream_) {
+    ENVOY_LOG_MISC(trace, "Expecting new stream on host {}", index);
+    expectStreamCreate(index); //This only needs to happen if recieved a response
+    recieved_response_and_no_new_stream_ = false;
+  }
   test_sessions_[index]->interval_timer_->invokeCallback();
 }
 
@@ -105,7 +115,7 @@ void HealthCheckFuzz::raiseEvent(test::common::upstream::RaiseEvent event, bool 
   case HealthCheckFuzz::Type::HTTP: {
     test_sessions_[index]->client_connection_->raiseEvent(eventType);
     if (!last_action && eventType != Network::ConnectionEvent::Connected) {
-      ENVOY_LOG_MISC(trace, "Creating client and stream from close event.");
+      ENVOY_LOG_MISC(trace, "Creating client and stream from close event on host {}.", index);
       expectClientCreate(index);
       expectStreamCreate(index);
       test_sessions_[index]->interval_timer_->invokeCallback();
@@ -135,6 +145,7 @@ void HealthCheckFuzz::replay(test::common::upstream::HealthCheckTestCase input) 
       default:
         break;
       }
+      recieved_response_and_no_new_stream_ = true;
       break;
     }
     case test::common::upstream::Action::kTriggerIntervalTimer: {

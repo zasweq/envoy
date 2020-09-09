@@ -28,7 +28,7 @@ private:
 
   void replay(test::common::upstream::HealthCheckTestCase input);
   bool second_host_;
-  Event::SimulatedTimeSystem time_system_;
+  bool recieved_response_and_no_new_stream_;
 };
 
 } // namespace Upstream
