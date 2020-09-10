@@ -65,6 +65,16 @@ void HttpHealthCheckerImplTestBase::expectStreamCreate(size_t index) {
       .WillOnce(DoAll(SaveArgAddress(&test_sessions_[index]->stream_response_callbacks_),
                       ReturnRef(test_sessions_[index]->request_encoder_)));
 }
+/*
+void HttpHealthCheckerImplTestBase::clearCallbacks(int index) {
+  test_sessions_[index]->request_encoder_.stream_.callbacks_.clear();
+}
+*/
+void HttpHealthCheckerImplTestBase::setUpOnCall(size_t index) {
+  ON_CALL(*test_sessions_[index]->codec_, newStream(_))
+      .WillByDefault(DoAll(SaveArgAddress(&test_sessions_[index]->stream_response_callbacks_),
+                      ReturnRef(test_sessions_[index]->request_encoder_)));
+}
 
 void HttpHealthCheckerImplTestBase::expectSessionCreate() {
   expectSessionCreate(health_checker_map_);

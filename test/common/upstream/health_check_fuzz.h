@@ -25,6 +25,7 @@ private:
   void triggerTimeoutTimer(bool create_stream_on_second_host, bool last_action);
   void allocHealthCheckerFromProto(const envoy::config::core::v3::HealthCheck& config);
   void raiseEvent(test::common::upstream::RaiseEvent event, bool second_host, bool last_action);
+  void clearCallbacks(int index);
 
   void replay(test::common::upstream::HealthCheckTestCase input);
   bool second_host_;

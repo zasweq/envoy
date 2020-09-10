@@ -643,7 +643,7 @@ TEST_F(HttpHealthCheckerImplTest, InitialJitterNoTraffic) {
   EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
   health_checker_->start();
-  test_sessions_[0]->interval_timer_->invokeCallback();
+  test_sessions_[0]->interval_timer_->invokeCallback(); //NO STREAM CREATE
 
   EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
@@ -661,6 +661,20 @@ TEST_F(HttpHealthCheckerImplTest, InitialJitterNoTraffic) {
     EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
     respond(0, "200", false, false, true, true);
   }
+}
+
+TEST_F(HttpHealthCheckerImplTest, Temp) {
+  setupInitialJitter();
+  EXPECT_CALL(*this, onHostStatus(_, HealthTransition::Unchanged)).Times(testing::AnyNumber());
+
+  cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
+      makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
+  expectSessionCreate();
+  expectStreamCreate(0);
+  EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
+  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
+  health_checker_->start();
+  test_sessions_[0]->interval_timer_->invokeCallback(); //NO STREAM CREATE
 }
 
 TEST_F(HttpHealthCheckerImplTest, SuccessIntervalJitterPercentNoTraffic) {
@@ -1317,7 +1331,7 @@ TEST_F(HttpHealthCheckerImplTest, SuccessServiceCheckWithoutUserAgent) {
 
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
   expectStreamCreate(0);
-  test_sessions_[0]->interval_timer_->invokeCallback();
+  test_sessions_[0]->interval_timer_->invokeCallback(); //NOTE THIS.
 }
 
 TEST_F(HttpHealthCheckerImplTest, ServiceDoesNotMatchFail) {
@@ -1869,7 +1883,7 @@ TEST_F(HttpHealthCheckerImplTest, ConnectionClose) {
   expectClientCreate(0);
   expectStreamCreate(0);
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
-  test_sessions_[0]->interval_timer_->invokeCallback();
+  test_sessions_[0]->interval_timer_->invokeCallback(); //NOTE: THIS
 }
 
 TEST_F(HttpHealthCheckerImplTest, ProxyConnectionClose) {
@@ -2633,6 +2647,43 @@ TEST_F(HttpHealthCheckerImplTest, DEPRECATED_FEATURE_TEST(ServiceNameMismatch)) 
       Host::HealthFlag::FAILED_ACTIVE_HC));
   EXPECT_EQ(Host::Health::Unhealthy,
             cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->health());
+}
+
+TEST_F(HttpHealthCheckerImplTest, LargeConfigNanoValuesIntervalJitter) {
+  const std::string yaml = R"EOF(
+    timeout: 1s
+    interval: 1s
+    interval_jitter:
+      seconds: 1
+      nanos: 1929379840
+    unhealthy_threshold: 2
+    healthy_threshold: 2
+    no_traffic_interval: 1s
+    http_health_check:
+      service_name_matcher:
+        prefix: locations
+      path: /healthcheck
+    )EOF";
+    allocHealthChecker(yaml, false);
+}
+
+TEST_F(HttpHealthCheckerImplTest, LargeConfigNanoValuesInitialJitter) {
+  const std::string yaml = R"EOF(
+    timeout: 1s
+    interval: 1s
+    interval_jitter: 1s
+    initial_jitter:
+      seconds: 1
+      nanos: 1929379840
+    unhealthy_threshold: 2
+    healthy_threshold: 2
+    no_traffic_interval: 1s
+    http_health_check:
+      service_name_matcher:
+        prefix: locations
+      path: /healthcheck
+    )EOF";
+    allocHealthChecker(yaml, false);
 }
 
 TEST_F(ProdHttpHealthCheckerTest, ProdHttpHealthCheckerH2HealthChecking) {

@@ -60,6 +60,10 @@ public:
 
   void expectStreamCreate(size_t index);
 
+  //void clearCallbacks(int index);
+
+  void setUpOnCall(size_t index);
+
   void expectSessionCreate();
   void expectClientCreate(size_t index);
 

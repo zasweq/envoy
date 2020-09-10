@@ -30,7 +30,8 @@ void HealthCheckFuzz::initializeAndReplay(test::common::upstream::HealthCheckTes
   cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
       makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
   expectSessionCreate();
-  expectStreamCreate(0);
+  setUpOnCall(0);
+  clearCallbacks(0); //TODO: Do I even need this?
   if (input.start_failed()) {
     cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->healthFlagSet(
         Host::HealthFlag::FAILED_ACTIVE_HC);
@@ -41,7 +42,8 @@ void HealthCheckFuzz::initializeAndReplay(test::common::upstream::HealthCheckTes
     ENVOY_LOG_MISC(trace, "Created second host.");
     second_host_ = true;
     expectSessionCreate();
-    expectStreamCreate(1);
+    setUpOnCall(1);
+    clearCallbacks(1); //TODO: Do I even need this?
     if (input.start_failed()) {
       cluster_->prioritySet().getMockHostSet(0)->hosts_[1]->healthFlagSet(
           Host::HealthFlag::FAILED_ACTIVE_HC);
@@ -72,7 +74,8 @@ void HealthCheckFuzz::triggerIntervalTimer(bool second_host) {
   ENVOY_LOG_MISC(trace, "Triggered interval timer on host {}", index);
   if (recieved_response_and_no_new_stream_) {
     ENVOY_LOG_MISC(trace, "Expecting new stream on host {}", index);
-    expectStreamCreate(index); //This only needs to happen if recieved a response
+    setUpOnCall(index);
+    clearCallbacks(index); //This only needs to happen if recieved a response
     recieved_response_and_no_new_stream_ = false;
   }
   test_sessions_[index]->interval_timer_->invokeCallback();
@@ -85,7 +88,8 @@ void HealthCheckFuzz::triggerTimeoutTimer(bool second_host, bool last_action) {
   if (!last_action) {
     ENVOY_LOG_MISC(trace, "Creating client and stream from network timeout.");
     expectClientCreate(index);
-    expectStreamCreate(index);
+    setUpOnCall(index);
+    clearCallbacks(index);
     test_sessions_[index]->interval_timer_->invokeCallback();
   }
 }
@@ -117,7 +121,8 @@ void HealthCheckFuzz::raiseEvent(test::common::upstream::RaiseEvent event, bool 
     if (!last_action && eventType != Network::ConnectionEvent::Connected) {
       ENVOY_LOG_MISC(trace, "Creating client and stream from close event on host {}.", index);
       expectClientCreate(index);
-      expectStreamCreate(index);
+      setUpOnCall(index);
+      clearCallbacks(index);
       test_sessions_[index]->interval_timer_->invokeCallback();
     }
     break;
@@ -125,6 +130,10 @@ void HealthCheckFuzz::raiseEvent(test::common::upstream::RaiseEvent event, bool 
   default:
     break;
   }
+}
+
+void HealthCheckFuzz::clearCallbacks(int index) {
+  test_sessions_[index]->request_encoder_.stream_.callbacks_.clear();
 }
 
 void HealthCheckFuzz::replay(test::common::upstream::HealthCheckTestCase input) {
