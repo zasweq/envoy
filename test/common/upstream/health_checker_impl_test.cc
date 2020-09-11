@@ -663,6 +663,20 @@ TEST_F(HttpHealthCheckerImplTest, InitialJitterNoTraffic) {
   }
 }
 
+TEST_F(HttpHealthCheckerImplTest, Temp) {
+  setupInitialJitter();
+  EXPECT_CALL(*this, onHostStatus(_, HealthTransition::Unchanged)).Times(testing::AnyNumber());
+
+  cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
+      makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
+  expectSessionCreate();
+  expectStreamCreate(0);
+  EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
+  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
+  health_checker_->start();
+  test_sessions_[0]->interval_timer_->invokeCallback(); //NO STREAM CREATE
+}
+
 TEST_F(HttpHealthCheckerImplTest, SuccessIntervalJitterPercentNoTraffic) {
   setupIntervalJitterPercent();
   EXPECT_CALL(*this, onHostStatus(_, HealthTransition::Unchanged)).Times(testing::AnyNumber());

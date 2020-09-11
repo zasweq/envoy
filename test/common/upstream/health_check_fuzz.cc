@@ -49,6 +49,12 @@ void HealthCheckFuzz::initializeAndReplay(test::common::upstream::HealthCheckTes
   health_checker_->start();
   ON_CALL(runtime_.snapshot_, getInteger("health_check.min_interval", _))
       .WillByDefault(testing::Return(45000));
+  if (input.health_check_config().initial_jitter().seconds() != 0) {
+    test_sessions_[0]->interval_timer_->invokeCallback();
+    if (input.create_second_host()) {
+      test_sessions_[1]->interval_timer_->invokeCallback();
+    }
+  }
   replay(input);
 }
 
@@ -62,12 +68,18 @@ void HealthCheckFuzz::respondHttp(test::fuzz::Headers headers, absl::string_view
 
   const int index = (second_host_ && second_host) ? 1 : 0;
 
+  ENVOY_LOG_MISC(trace, "Responded headers on host {}", index);
+
   test_sessions_[index]->stream_response_callbacks_->decodeHeaders(std::move(response_headers),
                                                                    true);
 }
 
 void HealthCheckFuzz::triggerIntervalTimer(bool second_host) {
   const int index = (second_host_ && second_host) ? 1 : 0;
+  if (!test_sessions_[index]->interval_timer_->enabled_) {
+    ENVOY_LOG_MISC(trace, "Interval timer is disabled. Skipping trigger interval timer.");
+    return;
+  }
   ENVOY_LOG_MISC(trace, "Triggered interval timer on host {}", index);
   expectStreamCreate(index);
   test_sessions_[index]->interval_timer_->invokeCallback();
