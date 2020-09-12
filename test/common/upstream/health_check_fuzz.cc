@@ -49,6 +49,7 @@ void HealthCheckFuzz::initializeAndReplay(test::common::upstream::HealthCheckTes
   health_checker_->start();
   ON_CALL(runtime_.snapshot_, getInteger("health_check.min_interval", _))
       .WillByDefault(testing::Return(45000));
+  //If has an initial jitter, this calls onIntervalBase and finishes cleanup
   if (input.health_check_config().initial_jitter().seconds() != 0) {
     test_sessions_[0]->interval_timer_->invokeCallback();
     if (input.create_second_host()) {
@@ -60,40 +61,64 @@ void HealthCheckFuzz::initializeAndReplay(test::common::upstream::HealthCheckTes
 
 void HealthCheckFuzz::respondHttp(test::fuzz::Headers headers, absl::string_view status,
                                   bool second_host) {
+  const int index = (second_host_ && second_host) ? 1 : 0;
+
+  //Timeout timer needs to be explicity enabled, usually by onIntervalBase() (Callback on interval timer).
+  if (!test_sessions_[index]->timeout_timer_->enabled_) {
+    ENVOY_LOG_MISC(trace, "Timeout timer is disabled. Skipping response.");
+    return;
+  }
+  
   std::unique_ptr<Http::TestResponseHeaderMapImpl> response_headers =
       std::make_unique<Http::TestResponseHeaderMapImpl>(
           Fuzz::fromHeaders<Http::TestResponseHeaderMapImpl>(headers, {}, {}));
 
   response_headers->setStatus(status);
 
-  const int index = (second_host_ && second_host) ? 1 : 0;
-
   ENVOY_LOG_MISC(trace, "Responded headers on host {}", index);
 
   test_sessions_[index]->stream_response_callbacks_->decodeHeaders(std::move(response_headers),
                                                                    true);
+
+  //TODO: This can cause client to crash
+
 }
 
 void HealthCheckFuzz::triggerIntervalTimer(bool second_host) {
   const int index = (second_host_ && second_host) ? 1 : 0;
+  //Interval timer needs to be explicitly enabled, usually by decodeHeaders.
   if (!test_sessions_[index]->interval_timer_->enabled_) {
     ENVOY_LOG_MISC(trace, "Interval timer is disabled. Skipping trigger interval timer.");
     return;
-  }
+  } //With this check, only crash-2 failed
+  //without this check d...also failed, crash-test also failed
   ENVOY_LOG_MISC(trace, "Triggered interval timer on host {}", index);
   expectStreamCreate(index);
   test_sessions_[index]->interval_timer_->invokeCallback();
 }
 
+//Note: something wrong with this invokeCallback for interval means the interval timer should be enabled
 void HealthCheckFuzz::triggerTimeoutTimer(bool second_host, bool last_action) {
   const int index = (second_host_ && second_host) ? 1 : 0;
+  //Timeout timer needs to be explicitly enabled, usually by onIntervalBase()
+  if (!test_sessions_[index]->timeout_timer_->enabled_) {
+    ENVOY_LOG_MISC(trace, "Timeout timer is disabled. Skipping trigger timeout timer.");
+    return;
+  }
   ENVOY_LOG_MISC(trace, "Triggered timeout timer on host {}", index);
-  test_sessions_[index]->timeout_timer_->invokeCallback();
+  test_sessions_[index]->timeout_timer_->invokeCallback(); //This closes the client, turns off timeout and enables interval
   if (!last_action) {
-    ENVOY_LOG_MISC(trace, "Creating client and stream from network timeout.");
+    ENVOY_LOG_MISC(trace, "Creating client and stream from network timeout on host {}.", index);
     expectClientCreate(index);
     expectStreamCreate(index);
     test_sessions_[index]->interval_timer_->invokeCallback();
+    //NOTE: JUST TRYING THIS OUT, if client goes bad for both hosts try this out
+    /*if (second_host_) {
+      int index2 = 1 - index;
+      expectClientCreate(index2);
+      expectStreamCreate(index2);
+      test_sessions_[index2]->interval_timer_->invokeCallback();
+    }*/
   }
 }
 
@@ -171,6 +196,7 @@ void HealthCheckFuzz::replay(test::common::upstream::HealthCheckTestCase input) 
       break;
     }
   }
+  //TODO: Cleanup?
 }
 
 } // namespace Upstream

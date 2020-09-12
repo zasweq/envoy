@@ -29,6 +29,7 @@ void HttpHealthCheckerImplTestBase::expectClientCreate(
   connection_index_.push_back(index);
   codec_index_.push_back(index);
 
+  //Both of these methods pop from connection index, so must expect a client create for the methods to work properly beforehand
   EXPECT_CALL(dispatcher_, createClientConnection_(_, _, _, _))
       .Times(testing::AnyNumber())
       .WillRepeatedly(testing::InvokeWithoutArgs([&]() -> Network::ClientConnection* {
@@ -60,8 +61,8 @@ void HttpHealthCheckerImplTestBase::expectClientCreate(
 }
 
 void HttpHealthCheckerImplTestBase::expectStreamCreate(size_t index) {
-  test_sessions_[index]->request_encoder_.stream_.callbacks_.clear();
-  EXPECT_CALL(*test_sessions_[index]->codec_, newStream(_))
+  test_sessions_[index]->request_encoder_.stream_.callbacks_.clear(); //WOW DOES THIS CALL ENABLE TIMEOUT TIMER?
+  EXPECT_CALL(*test_sessions_[index]->codec_, newStream(_)) //Sets up mock behavior for newStream() call in onInterval()
       .WillOnce(DoAll(SaveArgAddress(&test_sessions_[index]->stream_response_callbacks_),
                       ReturnRef(test_sessions_[index]->request_encoder_)));
 }

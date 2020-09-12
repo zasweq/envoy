@@ -144,10 +144,10 @@ HealthCheckerImplBase::intervalWithJitter(uint64_t base_time_ms,
   const uint64_t max_interval = runtime_.snapshot().getInteger(
       "health_check.max_interval", std::numeric_limits<uint64_t>::max());
 
-  uint64_t final_ms = std::min(base_time_ms, max_interval);
+  uint64_t final_ms = std::min(base_time_ms, max_interval); //HAS TO BE IN BETWEEN MIN INTERVAL AND MAX INTERVAL
   // We force a non-zero final MS, to prevent live lock.
   final_ms = std::max(uint64_t(1), std::max(final_ms, min_interval));
-  return std::chrono::milliseconds(final_ms);
+  return std::chrono::milliseconds(final_ms); //45000ms
 }
 
 void HealthCheckerImplBase::addHosts(const HostVector& hosts) {
@@ -301,7 +301,7 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::handleSuccess(bool degrade
   first_check_ = false;
   parent_.runCallbacks(host_, changed_state);
 
-  timeout_timer_->disableTimer();
+  timeout_timer_->disableTimer(); //handle success
   interval_timer_->enableTimer(parent_.interval(HealthState::Healthy, changed_state));
 }
 
@@ -370,7 +370,7 @@ HealthCheckerImplBase::ActiveHealthCheckSession::clearPendingFlag(HealthTransiti
 
 void HealthCheckerImplBase::ActiveHealthCheckSession::onIntervalBase() {
   onInterval();
-  timeout_timer_->enableTimer(parent_.timeout_);
+  timeout_timer_->enableTimer(parent_.timeout_); //is this the only place it gets called?
   parent_.stats_.attempt_.inc();
 }
 
@@ -379,12 +379,14 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::onTimeoutBase() {
   handleFailure(envoy::data::core::v3::NETWORK);
 }
 
-void HealthCheckerImplBase::ActiveHealthCheckSession::onInitialInterval() {
+void HealthCheckerImplBase::ActiveHealthCheckSession::onInitialInterval() { //->start calls this here
   if (parent_.initial_jitter_.count() == 0) {
     onIntervalBase();
+    ENVOY_LOG_MISC(trace, "On initial interval had NO INITIAL JITTER, so called on IntervalBase (created new stream and enable timeout timer).");
   } else {
+    ENVOY_LOG_MISC(trace, "On initial interval enabled inteval timer due to HAVING AN INITIAL JITTER. You have to call interval_timer_->invokeCallback (IntervalBase) to represent.");
     interval_timer_->enableTimer(
-        std::chrono::milliseconds(parent_.intervalWithJitter(0, parent_.initial_jitter_)));
+        std::chrono::milliseconds(parent_.intervalWithJitter(0, parent_.initial_jitter_))); //Enables interval timer with this many seconds
   }
 }
 

@@ -546,6 +546,12 @@ public:
   MOCK_METHOD(void, onHostStatus, (HostSharedPtr host, HealthTransition changed_state));
 };
 
+//To invoke an interval callback, you must have some clause beforehand of turning it on "Enabiling it"
+
+//To enable an interval timer - you have to either start it with an initial jitter or it has to come after a respond call, which enables interval call
+//Invoking an interval callback onIntervalBase() -> onInterval(). onIntervalBase() is also called if no initial jitter. If there is an initial jitter,
+//it calls enable interval timer. Thus, you can directly invoke a callback directly after starting.
+
 TEST_F(HttpHealthCheckerImplTest, Success) {
   setupNoServiceValidationHC();
   EXPECT_CALL(*this, onHostStatus(_, HealthTransition::Unchanged)).Times(1);
@@ -555,16 +561,17 @@ TEST_F(HttpHealthCheckerImplTest, Success) {
   cluster_->info_->stats().upstream_cx_total_.inc();
   expectSessionCreate();
   expectStreamCreate(0);
-  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
-  health_checker_->start();
+  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _)); //Because no initial jitter, so doesnt call base
+  health_checker_->start(); //Call initial interval, which has branching logic
 
-  EXPECT_CALL(runtime_.snapshot_, getInteger("health_check.max_interval", _));
+  EXPECT_CALL(runtime_.snapshot_, getInteger("health_check.max_interval", _)); //Has to be in between min and max interval - so the min is 45 seconds
   EXPECT_CALL(runtime_.snapshot_, getInteger("health_check.min_interval", _))
       .WillOnce(Return(45000));
+  //These get triggered on handleSuccess()
   EXPECT_CALL(*test_sessions_[0]->interval_timer_,
-              enableTimer(std::chrono::milliseconds(45000), _));
+              enableTimer(std::chrono::milliseconds(45000), _)); //From max and min interval
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
-  respond(0, "200", false, false, true);
+  respond(0, "200", false, false, true); //Ends with response
   EXPECT_EQ(Host::Health::Healthy, cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->health());
 }
 
@@ -575,31 +582,31 @@ TEST_F(HttpHealthCheckerImplTest, Degraded) {
   cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
       makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
   cluster_->info_->stats().upstream_cx_total_.inc();
-  expectSessionCreate();
-  expectStreamCreate(0);
-  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
-  health_checker_->start();
+  expectSessionCreate(); //Creates a new test session
+  expectStreamCreate(0); //Expect stream is created in onInterval(). This is called in initial interval if no jitter
+  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _)); //Enables timeout timer if called initial interval with no jitter!
+  health_checker_->start(); //Calls initial interval, which has branching logic
 
   EXPECT_CALL(runtime_.snapshot_, getInteger("health_check.max_interval", _));
-  EXPECT_CALL(runtime_.snapshot_, getInteger("health_check.min_interval", _))
+  EXPECT_CALL(runtime_.snapshot_, getInteger("health_check.min_interval", _)) //min at 45000 ms
       .WillRepeatedly(Return(45000));
 
   // We start off as healthy, and should go degraded after receiving the degraded health response.
   EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
   EXPECT_CALL(event_logger_, logDegraded(_, _));
-  respond(0, "200", false, false, true, false, {}, true);
+  respond(0, "200", false, false, true, false, {}, true); //respond calls decodeHeaders() - which enables interval and turns off timeout timer
   EXPECT_EQ(Host::Health::Degraded, cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->health());
 
   // Then, after receiving a regular health check response we should go back to healthy.
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
-  expectStreamCreate(0);
+  expectStreamCreate(0); //TODO: figure out how this enables timeout_timer_
   EXPECT_CALL(runtime_.snapshot_, getInteger("health_check.max_interval", _));
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
-  test_sessions_[0]->interval_timer_->invokeCallback();
+  test_sessions_[0]->interval_timer_->invokeCallback(); //calls onInterval, enables timeout
   EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
   EXPECT_CALL(event_logger_, logNoLongerDegraded(_, _));
-  respond(0, "200", false, false, true, false, {}, false);
+  respond(0, "200", false, false, true, false, {}, false); //enables interval and turns off timeout, calls decodeHeaders(), onResponseHealthy()...
   EXPECT_EQ(Host::Health::Healthy, cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->health());
 }
 
@@ -609,26 +616,26 @@ TEST_F(HttpHealthCheckerImplTest, SuccessIntervalJitter) {
 
   cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
       makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
-  expectSessionCreate();
+  expectSessionCreate(); //Expects session create, also calls expect client, creates a client I believe onInterval() when the client is not there
   expectStreamCreate(0);
-  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
-  health_checker_->start();
+  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _)); //doesnt have initial jitter so hits timeout
+  health_checker_->start(); //calls initalIntervla, and thus onInterval (why client is being made)
 
   EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
-  respond(0, "200", false, false, true, true);
+  respond(0, "200", false, false, true, true); //Respond enables interval and disables
   EXPECT_EQ(Host::Health::Healthy, cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->health());
 
   for (int i = 0; i < 50000; i += 239) {
     EXPECT_CALL(random_, random()).WillOnce(Return(i));
     EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
-    expectStreamCreate(0);
+    expectStreamCreate(0); //Why do you need to create a stream after a response?
     test_sessions_[0]->interval_timer_->invokeCallback();
     // the jitter is 1000ms here
     EXPECT_CALL(*test_sessions_[0]->interval_timer_,
                 enableTimer(std::chrono::milliseconds(5000 + i % 1000), _));
     EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
-    respond(0, "200", false, false, true, true);
+    respond(0, "200", false, false, true, true); //enables interval and turns off timeout
   }
 }
 
@@ -640,41 +647,27 @@ TEST_F(HttpHealthCheckerImplTest, InitialJitterNoTraffic) {
       makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
   expectSessionCreate();
   expectStreamCreate(0);
-  EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
-  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
+  EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _)); //Expects the interval to call, as it gets turned on due to there being an initial jitter in branching logic from health_checker_->start()
+  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _)); //This is called from explicit callback which hits onIntervalBase(), which also turns on timeout timer
   health_checker_->start();
-  test_sessions_[0]->interval_timer_->invokeCallback();
+  test_sessions_[0]->interval_timer_->invokeCallback(); //Explcility calls onIntervalBase()
 
   EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
-  respond(0, "200", false, false, true, true);
+  respond(0, "200", false, false, true, true); //enables interval disables timeout
   EXPECT_EQ(Host::Health::Healthy, cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->health());
 
   for (int i = 0; i < 2; i += 1) {
     EXPECT_CALL(random_, random()).WillOnce(Return(i));
-    EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
+    EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _)); //Where on earth does this get called
     expectStreamCreate(0);
-    test_sessions_[0]->interval_timer_->invokeCallback();
+    test_sessions_[0]->interval_timer_->invokeCallback(); //OH DUH, ENABLE TIMER GETS CALLED HERE
     // the jitter is 40% of 5000, so should be 2000
     EXPECT_CALL(*test_sessions_[0]->interval_timer_,
                 enableTimer(std::chrono::milliseconds(5000 + i % 2000), _));
     EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
-    respond(0, "200", false, false, true, true);
+    respond(0, "200", false, false, true, true); //enables interval disables timeout respond, logical because timeout ends when returned, logical because timeout starts as the interval ends?
   }
-}
-
-TEST_F(HttpHealthCheckerImplTest, Temp) {
-  setupInitialJitter();
-  EXPECT_CALL(*this, onHostStatus(_, HealthTransition::Unchanged)).Times(testing::AnyNumber());
-
-  cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
-      makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
-  expectSessionCreate();
-  expectStreamCreate(0);
-  EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
-  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
-  health_checker_->start();
-  test_sessions_[0]->interval_timer_->invokeCallback(); //NO STREAM CREATE
 }
 
 TEST_F(HttpHealthCheckerImplTest, SuccessIntervalJitterPercentNoTraffic) {
@@ -683,26 +676,26 @@ TEST_F(HttpHealthCheckerImplTest, SuccessIntervalJitterPercentNoTraffic) {
 
   cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
       makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
-  expectSessionCreate();
-  expectStreamCreate(0);
+  expectSessionCreate(); //Creates a test session, expects a client to be made
+  expectStreamCreate(0); //Expects a stream to be made
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
-  health_checker_->start();
+  health_checker_->start(); //Creates a client and a stream, enables timeout_timer_
 
   EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
-  respond(0, "200", false, false, true, true);
+  respond(0, "200", false, false, true, true); //Respond enables interval timer and disables timeout
   EXPECT_EQ(Host::Health::Healthy, cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->health());
 
   for (int i = 0; i < 50000; i += 239) {
     EXPECT_CALL(random_, random()).WillOnce(Return(i));
     EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
-    expectStreamCreate(0);
+    expectStreamCreate(0); //Stream enables a timeout
     test_sessions_[0]->interval_timer_->invokeCallback();
     // the jitter is 40% of 5000, so should be 2000
     EXPECT_CALL(*test_sessions_[0]->interval_timer_,
-                enableTimer(std::chrono::milliseconds(5000 + i % 2000), _));
+                enableTimer(std::chrono::milliseconds(5000 + i % 2000), _)); //Enables interval timer with a certain amount of milliseconds
     EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
-    respond(0, "200", false, false, true, true);
+    respond(0, "200", false, false, true, true); //Enable interval, disable timeout, decodeHeaders which then calls onSuccess which does those
   }
 }
 
@@ -712,15 +705,15 @@ TEST_F(HttpHealthCheckerImplTest, SuccessIntervalJitterPercent) {
 
   cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
       makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
-  cluster_->info_->stats().upstream_cx_total_.inc();
+  cluster_->info_->stats().upstream_cx_total_.inc(); //DOES THIS DO ANYTHING?
   expectSessionCreate();
   expectStreamCreate(0);
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
-  health_checker_->start();
+  health_checker_->start(); //Timeout timer gets hit because branching log
 
   EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
   EXPECT_CALL(*test_sessions_[0]->timeout_timer_, disableTimer());
-  respond(0, "200", false, false, true, true);
+  respond(0, "200", false, false, true, true); //Interval gets enabled, timeout gets disabled
   EXPECT_EQ(Host::Health::Healthy, cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->health());
 
   for (int i = 0; i < 50000; i += 239) {
@@ -823,6 +816,21 @@ TEST_F(HttpHealthCheckerImplTest, SuccessWithMultipleHosts) {
   respond(1, "200", false, false, true);
   EXPECT_EQ(Host::Health::Healthy, cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->health());
   EXPECT_EQ(Host::Health::Healthy, cluster_->prioritySet().getMockHostSet(0)->hosts_[1]->health());
+}
+
+TEST_F(HttpHealthCheckerImplTest, Temp) {
+  setupNoServiceValidationHC();
+  EXPECT_CALL(*this, onHostStatus(_, HealthTransition::Unchanged)).Times(testing::AnyNumber());
+
+  cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
+      makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
+  expectSessionCreate();
+  expectStreamCreate(0);
+  EXPECT_CALL(*test_sessions_[0]->interval_timer_, enableTimer(_, _));
+  EXPECT_CALL(*test_sessions_[0]->timeout_timer_, enableTimer(_, _));
+  health_checker_->start();
+  expectStreamCreate(0);
+  test_sessions_[0]->interval_timer_->invokeCallback(); //NO STREAM CREATE
 }
 
 // Test host check success with multiple hosts across multiple priorities.
