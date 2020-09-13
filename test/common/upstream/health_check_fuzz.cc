@@ -27,7 +27,7 @@ void HealthCheckFuzz::initializeAndReplay(test::common::upstream::HealthCheckTes
       .WillByDefault(testing::Return(input.http_verify_cluster()));
   cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
       makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
-  expectSessionCreateWithCallback();
+  expectSessionCreate();
   expectStreamCreate(0);
   if (input.start_failed()) {
     cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->healthFlagSet(
@@ -39,6 +39,10 @@ void HealthCheckFuzz::initializeAndReplay(test::common::upstream::HealthCheckTes
   //If has an initial jitter, this calls onIntervalBase and finishes cleanup
   if (input.health_check_config().initial_jitter().seconds() != 0) {
     test_sessions_[0]->interval_timer_->invokeCallback();
+  }
+  reuse_connection_ = true;
+  if (input.health_check_config().has_reuse_connection()) { //TODO: Does this make sense?
+    reuse_connection_ = input.health_check_config().reuse_connection().value();
   }
   replay(input);
 }
@@ -59,10 +63,29 @@ void HealthCheckFuzz::respondHttp(test::fuzz::Headers headers, absl::string_view
 
   ENVOY_LOG_MISC(trace, "Responded headers");
 
+  //TODO: This can cause client to close, if so create a new one
+  bool client_will_close = false;
+  if (response_headers->Connection()) {
+    client_will_close =
+        absl::EqualsIgnoreCase(response_headers->Connection()->value().getStringView(),
+                               Http::Headers::get().ConnectionValues.Close);
+  }
+
+  if (response_headers->ProxyConnection()) {
+    client_will_close =
+        absl::EqualsIgnoreCase(response_headers->ProxyConnection()->value().getStringView(),
+                               Http::Headers::get().ConnectionValues.Close);
+  }
+
   test_sessions_[0]->stream_response_callbacks_->decodeHeaders(std::move(response_headers),
                                                                    true);
 
-  //TODO: This can cause client to crash
+  if (!reuse_connection_ || client_will_close) {
+    ENVOY_LOG_MISC(trace, "Creating client and stream because shouldClose() is true");
+    expectClientCreate(0);
+    expectStreamCreate(0);
+    test_sessions_[0]->interval_timer_->invokeCallback();
+  }
 
 }
 
@@ -73,7 +96,7 @@ void HealthCheckFuzz::triggerIntervalTimer() {
     return;
   }
   if (test_sessions_[0]->codec_client_destructed_) {
-    expectClientCreateWithCallback();
+    expectClientCreate(0);
     test_sessions_[0]->codec_client_destructed_ = false;
     ENVOY_LOG_MISC(trace, "CodecClient was destructed. Expecting a new one to be made.");
   }
@@ -93,7 +116,7 @@ void HealthCheckFuzz::triggerTimeoutTimer(bool last_action) {
   test_sessions_[0]->timeout_timer_->invokeCallback(); //This closes the client, turns off timeout and enables interval
   if (!last_action) {
     ENVOY_LOG_MISC(trace, "Creating client and stream from network timeout");
-    expectClientCreateWithCallback();
+    expectClientCreate(0);
     expectStreamCreate(0);
     test_sessions_[0]->interval_timer_->invokeCallback();
   }
@@ -123,9 +146,9 @@ void HealthCheckFuzz::raiseEvent(test::common::upstream::RaiseEvent event,
   switch (type_) {
   case HealthCheckFuzz::Type::HTTP: {
     test_sessions_[0]->client_connection_->raiseEvent(eventType);
-    if (!last_action && eventType != Network::ConnectionEvent::Connected) {
+    if (!last_action && eventType != Network::ConnectionEvent::Connected) { //TODO: Discuss with Asra, you can either have this hardcoded here or handled in an expect stream create, but I feel like hardcoding would be better in terms of recreating client/stream, as otherwise events would have to cycle until invokeIntervalTimer()  to do anything
       ENVOY_LOG_MISC(trace, "Creating client and stream from close event");
-      expectClientCreateWithCallback();
+      expectClientCreate(0);
       expectStreamCreate(0);
       test_sessions_[0]->interval_timer_->invokeCallback();
     }

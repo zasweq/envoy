@@ -26,6 +26,8 @@ private:
   void raiseEvent(test::common::upstream::RaiseEvent event, bool last_action);
 
   void replay(test::common::upstream::HealthCheckTestCase input);
+
+  bool reuse_connection_;
 };
 
 } // namespace Upstream
