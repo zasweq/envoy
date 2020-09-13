@@ -17,7 +17,6 @@ void HealthCheckFuzz::allocHealthCheckerFromProto(
 }
 
 void HealthCheckFuzz::initializeAndReplay(test::common::upstream::HealthCheckTestCase input) {
-  second_host_ = false;
   try {
     allocHealthCheckerFromProto(input.health_check_config());
   } catch (EnvoyException& e) {
@@ -28,23 +27,11 @@ void HealthCheckFuzz::initializeAndReplay(test::common::upstream::HealthCheckTes
       .WillByDefault(testing::Return(input.http_verify_cluster()));
   cluster_->prioritySet().getMockHostSet(0)->hosts_ = {
       makeTestHost(cluster_->info_, "tcp://127.0.0.1:80")};
-  expectSessionCreate();
+  expectSessionCreateWithCallback();
   expectStreamCreate(0);
   if (input.start_failed()) {
     cluster_->prioritySet().getMockHostSet(0)->hosts_[0]->healthFlagSet(
         Host::HealthFlag::FAILED_ACTIVE_HC);
-  }
-  if (input.create_second_host()) {
-    cluster_->prioritySet().getMockHostSet(0)->hosts_.push_back(
-        makeTestHost(cluster_->info_, "tcp://127.0.0.1:81"));
-    ENVOY_LOG_MISC(trace, "Created second host.");
-    second_host_ = true;
-    expectSessionCreate();
-    expectStreamCreate(1);
-    if (input.start_failed()) {
-      cluster_->prioritySet().getMockHostSet(0)->hosts_[1]->healthFlagSet(
-          Host::HealthFlag::FAILED_ACTIVE_HC);
-    }
   }
   health_checker_->start();
   ON_CALL(runtime_.snapshot_, getInteger("health_check.min_interval", _))
@@ -52,19 +39,14 @@ void HealthCheckFuzz::initializeAndReplay(test::common::upstream::HealthCheckTes
   //If has an initial jitter, this calls onIntervalBase and finishes cleanup
   if (input.health_check_config().initial_jitter().seconds() != 0) {
     test_sessions_[0]->interval_timer_->invokeCallback();
-    if (input.create_second_host()) {
-      test_sessions_[1]->interval_timer_->invokeCallback();
-    }
   }
   replay(input);
 }
 
-void HealthCheckFuzz::respondHttp(test::fuzz::Headers headers, absl::string_view status,
-                                  bool second_host) {
-  const int index = (second_host_ && second_host) ? 1 : 0;
+void HealthCheckFuzz::respondHttp(test::fuzz::Headers headers, absl::string_view status) {
 
   //Timeout timer needs to be explicity enabled, usually by onIntervalBase() (Callback on interval timer).
-  if (!test_sessions_[index]->timeout_timer_->enabled_) {
+  if (!test_sessions_[0]->timeout_timer_->enabled_) {
     ENVOY_LOG_MISC(trace, "Timeout timer is disabled. Skipping response.");
     return;
   }
@@ -75,54 +57,49 @@ void HealthCheckFuzz::respondHttp(test::fuzz::Headers headers, absl::string_view
 
   response_headers->setStatus(status);
 
-  ENVOY_LOG_MISC(trace, "Responded headers on host {}", index);
+  ENVOY_LOG_MISC(trace, "Responded headers");
 
-  test_sessions_[index]->stream_response_callbacks_->decodeHeaders(std::move(response_headers),
+  test_sessions_[0]->stream_response_callbacks_->decodeHeaders(std::move(response_headers),
                                                                    true);
 
   //TODO: This can cause client to crash
 
 }
 
-void HealthCheckFuzz::triggerIntervalTimer(bool second_host) {
-  const int index = (second_host_ && second_host) ? 1 : 0;
+void HealthCheckFuzz::triggerIntervalTimer() {
   //Interval timer needs to be explicitly enabled, usually by decodeHeaders.
-  if (!test_sessions_[index]->interval_timer_->enabled_) {
+  if (!test_sessions_[0]->interval_timer_->enabled_) {
     ENVOY_LOG_MISC(trace, "Interval timer is disabled. Skipping trigger interval timer.");
     return;
-  } //With this check, only crash-2 failed
-  //without this check d...also failed, crash-test also failed
-  ENVOY_LOG_MISC(trace, "Triggered interval timer on host {}", index);
-  expectStreamCreate(index);
-  test_sessions_[index]->interval_timer_->invokeCallback();
+  }
+  if (test_sessions_[0]->codec_client_destructed_) {
+    expectClientCreateWithCallback();
+    test_sessions_[0]->codec_client_destructed_ = false;
+    ENVOY_LOG_MISC(trace, "CodecClient was destructed. Expecting a new one to be made.");
+  }
+  expectStreamCreate(0);
+  ENVOY_LOG_MISC(trace, "Triggered interval timer");
+  test_sessions_[0]->interval_timer_->invokeCallback();
 }
 
 //Note: something wrong with this invokeCallback for interval means the interval timer should be enabled
-void HealthCheckFuzz::triggerTimeoutTimer(bool second_host, bool last_action) {
-  const int index = (second_host_ && second_host) ? 1 : 0;
+void HealthCheckFuzz::triggerTimeoutTimer(bool last_action) {
   //Timeout timer needs to be explicitly enabled, usually by onIntervalBase()
-  if (!test_sessions_[index]->timeout_timer_->enabled_) {
+  if (!test_sessions_[0]->timeout_timer_->enabled_) {
     ENVOY_LOG_MISC(trace, "Timeout timer is disabled. Skipping trigger timeout timer.");
     return;
   }
-  ENVOY_LOG_MISC(trace, "Triggered timeout timer on host {}", index);
-  test_sessions_[index]->timeout_timer_->invokeCallback(); //This closes the client, turns off timeout and enables interval
+  ENVOY_LOG_MISC(trace, "Triggered timeout timer");
+  test_sessions_[0]->timeout_timer_->invokeCallback(); //This closes the client, turns off timeout and enables interval
   if (!last_action) {
-    ENVOY_LOG_MISC(trace, "Creating client and stream from network timeout on host {}.", index);
-    expectClientCreate(index);
-    expectStreamCreate(index);
-    test_sessions_[index]->interval_timer_->invokeCallback();
-    //NOTE: JUST TRYING THIS OUT, if client goes bad for both hosts try this out
-    /*if (second_host_) {
-      int index2 = 1 - index;
-      expectClientCreate(index2);
-      expectStreamCreate(index2);
-      test_sessions_[index2]->interval_timer_->invokeCallback();
-    }*/
+    ENVOY_LOG_MISC(trace, "Creating client and stream from network timeout");
+    expectClientCreateWithCallback();
+    expectStreamCreate(0);
+    test_sessions_[0]->interval_timer_->invokeCallback();
   }
 }
 
-void HealthCheckFuzz::raiseEvent(test::common::upstream::RaiseEvent event, bool second_host,
+void HealthCheckFuzz::raiseEvent(test::common::upstream::RaiseEvent event,
                                  bool last_action) {
   Network::ConnectionEvent eventType;
   switch (event.event_selector_case()) {
@@ -143,15 +120,14 @@ void HealthCheckFuzz::raiseEvent(test::common::upstream::RaiseEvent event, bool 
     break;
   }
 
-  const int index = (second_host_ && second_host) ? 1 : 0;
   switch (type_) {
   case HealthCheckFuzz::Type::HTTP: {
-    test_sessions_[index]->client_connection_->raiseEvent(eventType);
+    test_sessions_[0]->client_connection_->raiseEvent(eventType);
     if (!last_action && eventType != Network::ConnectionEvent::Connected) {
-      ENVOY_LOG_MISC(trace, "Creating client and stream from close event on host {}", index);
-      expectClientCreate(index);
-      expectStreamCreate(index);
-      test_sessions_[index]->interval_timer_->invokeCallback();
+      ENVOY_LOG_MISC(trace, "Creating client and stream from close event");
+      expectClientCreateWithCallback();
+      expectStreamCreate(0);
+      test_sessions_[0]->interval_timer_->invokeCallback();
     }
     break;
   }
@@ -170,8 +146,11 @@ void HealthCheckFuzz::replay(test::common::upstream::HealthCheckTestCase input) 
     case test::common::upstream::Action::kRespond: {
       switch (type_) {
       case HealthCheckFuzz::Type::HTTP: {
+        if (event.respond().http_respond().status().empty()) { //TODO: Required because can't documentation about requireds for strings in proto.
+          return;
+        }
         respondHttp(event.respond().http_respond().headers(),
-                    event.respond().http_respond().status(), event.respond().second_host());
+                    event.respond().http_respond().status());
         break;
       }
       // TODO: TCP and gRPC
@@ -181,15 +160,15 @@ void HealthCheckFuzz::replay(test::common::upstream::HealthCheckTestCase input) 
       break;
     }
     case test::common::upstream::Action::kTriggerIntervalTimer: {
-      triggerIntervalTimer(event.trigger_interval_timer().second_host());
+      triggerIntervalTimer();
       break;
     }
     case test::common::upstream::Action::kTriggerTimeoutTimer: {
-      triggerTimeoutTimer(event.trigger_timeout_timer().second_host(), last_action);
+      triggerTimeoutTimer(last_action);
       break;
     }
     case test::common::upstream::Action::kRaiseEvent: {
-      raiseEvent(event.raise_event(), event.raise_event().second_host(), last_action);
+      raiseEvent(event.raise_event(), last_action);
       break;
     }
     default:

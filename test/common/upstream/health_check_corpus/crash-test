@@ -26,6 +26,6 @@ health_check_config {
 }
 actions {
   trigger_interval_timer {
-    second_host: true
+
   }
 }

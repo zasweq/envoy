@@ -51,7 +51,9 @@ CodecClient::CodecClient(Type type, Network::ClientConnectionPtr&& connection,
 
 CodecClient::~CodecClient() = default;
 
-void CodecClient::close() { connection_->close(Network::ConnectionCloseType::NoFlush); }
+void CodecClient::close() { 
+  ENVOY_LOG_MISC(trace, "Codec Client Closed");
+  connection_->close(Network::ConnectionCloseType::NoFlush); }
 
 void CodecClient::deleteRequest(ActiveRequest& request) {
   connection_->dispatcher().deferredDelete(request.removeFromList(active_requests_));

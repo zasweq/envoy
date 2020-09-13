@@ -1,6 +1,7 @@
 health_check_config {
   timeout {
     seconds: 1
+    nanos: 7544832
   }
   interval {
     seconds: 1
@@ -20,39 +21,8 @@ health_check_config {
       prefix: "locations"
     }
   }
-  no_traffic_interval {
-    seconds: 1
-  }
-}
-actions {
-  trigger_timeout_timer {
-  }
 }
 actions {
   respond {
-    http_respond {
-      headers {
-        headers {
-          key: ":status"
-          value: "200"
-        }
-      }
-      status: "200"
-    }
   }
 }
-actions {
-  respond {
-    http_respond {
-      headers {
-        headers {
-          key: ":status"
-          value: "200"
-        }
-      }
-      status: "200"
-    }
-    second_host: true
-  }
-}
-create_second_host: true

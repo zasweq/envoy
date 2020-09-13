@@ -60,6 +60,57 @@ void HttpHealthCheckerImplTestBase::expectClientCreate(
           }));
 }
 
+void HttpHealthCheckerImplTestBase::expectSessionCreateWithCallback(
+    const HostWithHealthCheckMap& health_check_map) {
+  // Expectations are in LIFO order.
+  TestSessionPtr new_test_session(new TestSession());
+  test_sessions_.emplace_back(std::move(new_test_session));
+  TestSession& test_session = *test_sessions_.back();
+  test_session.timeout_timer_ = new Event::MockTimer(&dispatcher_);
+  test_session.interval_timer_ = new Event::MockTimer(&dispatcher_);
+  expectClientCreateWithCallback(health_check_map);
+}
+
+void HttpHealthCheckerImplTestBase::expectClientCreateWithCallback(const HostWithHealthCheckMap& health_check_map) {
+  TestSession& test_session = *test_sessions_[0];
+  test_session.codec_ = new NiceMock<Http::MockClientConnection>();
+  ON_CALL(*test_session.codec_, protocol()).WillByDefault(testing::Return(Http::Protocol::Http11));
+  test_session.client_connection_ = new NiceMock<Network::MockClientConnection>();
+  connection_index_.push_back(0);
+  codec_index_.push_back(0);
+
+  //Both of these methods pop from connection index, so must expect a client create for the methods to work properly beforehand
+  EXPECT_CALL(dispatcher_, createClientConnection_(_, _, _, _))
+      .Times(testing::AnyNumber())
+      .WillRepeatedly(testing::InvokeWithoutArgs([&]() -> Network::ClientConnection* {
+        uint32_t index = connection_index_.front();
+        connection_index_.pop_front();
+        return test_sessions_[index]->client_connection_;
+      }));
+  EXPECT_CALL(*health_checker_, createCodecClient_(_))
+      .WillRepeatedly(
+          Invoke([&](Upstream::Host::CreateConnectionData& conn_data) -> Http::CodecClient* {
+            if (!health_check_map.empty()) {
+              const auto& health_check_config =
+                  health_check_map.at(conn_data.host_description_->address()->asString());
+              // To make sure health checker checks the correct port.
+              EXPECT_EQ(health_check_config.port_value(),
+                        conn_data.host_description_->healthCheckAddress()->ip()->port());
+            }
+            uint32_t index = codec_index_.front();
+            codec_index_.pop_front();
+            TestSession& test_session = *test_sessions_[index];
+            std::shared_ptr<Upstream::MockClusterInfo> cluster{
+                new NiceMock<Upstream::MockClusterInfo>()};
+            Event::MockDispatcher dispatcher_;
+            return new CodecClientForTest(
+                Http::CodecClient::Type::HTTP1, std::move(conn_data.connection_),
+                test_session.codec_, [this](Http::CodecClient*) -> void { test_sessions_[0]->codec_client_destructed_ = true;
+                /*ENVOY_LOG_MISC(trace, "Codec Client destructed.");*/},
+                Upstream::makeTestHost(cluster, "tcp://127.0.0.1:9000"), dispatcher_);
+          }));
+}
+
 void HttpHealthCheckerImplTestBase::expectStreamCreate(size_t index) {
   test_sessions_[index]->request_encoder_.stream_.callbacks_.clear(); //WOW DOES THIS CALL ENABLE TIMEOUT TIMER?
   EXPECT_CALL(*test_sessions_[index]->codec_, newStream(_)) //Sets up mock behavior for newStream() call in onInterval()
@@ -72,6 +123,14 @@ void HttpHealthCheckerImplTestBase::expectSessionCreate() {
 }
 void HttpHealthCheckerImplTestBase::expectClientCreate(size_t index) {
   expectClientCreate(index, health_checker_map_);
+}
+
+void HttpHealthCheckerImplTestBase::expectClientCreateWithCallback() {
+  expectClientCreateWithCallback(health_checker_map_);
+}
+
+void HttpHealthCheckerImplTestBase::expectSessionCreateWithCallback() {
+  expectSessionCreateWithCallback(health_checker_map_);
 }
 
 } // namespace Upstream

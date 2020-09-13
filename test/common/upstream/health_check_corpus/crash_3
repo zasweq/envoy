@@ -12,7 +12,11 @@ health_check_config {
     value: 2
   }
   healthy_threshold {
+  }
+  alt_port {
     value: 2
+  }
+  reuse_connection {
   }
   http_health_check {
     path: "/healthcheck"
@@ -25,10 +29,6 @@ health_check_config {
   }
 }
 actions {
-  trigger_timeout_timer {
-  }
-}
-actions {
   respond {
     http_respond {
       headers {
@@ -36,9 +36,33 @@ actions {
           key: ":status"
           value: "200"
         }
+        headers {
+          key: ":status"
+          value: "200"
+        }
+        headers {
+          key: "x-envoy-degraded"
+          value: "true"
+        }
       }
       status: "200"
     }
   }
 }
-create_second_host: true
+actions {
+  trigger_interval_timer {
+  }
+}
+actions {
+  respond {
+    http_respond {
+      headers {
+        headers {
+          key: "200"
+          value: "200"
+        }
+      }
+      status: "200"
+    }
+  }
+}

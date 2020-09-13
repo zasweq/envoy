@@ -47,6 +47,7 @@ public:
     Network::MockClientConnection* client_connection_{};
     NiceMock<Http::MockRequestEncoder> request_encoder_;
     Http::ResponseDecoder* stream_response_callbacks_{};
+    bool codec_client_destructed_;
   };
 
   using TestSessionPtr = std::unique_ptr<TestSession>;
@@ -62,6 +63,12 @@ public:
 
   void expectSessionCreate();
   void expectClientCreate(size_t index);
+
+  void expectClientCreateWithCallback(const HostWithHealthCheckMap& health_check_map);
+  void expectClientCreateWithCallback();
+
+  void expectSessionCreateWithCallback(const HostWithHealthCheckMap& health_check_map);
+  void expectSessionCreateWithCallback();
 
   std::vector<TestSessionPtr> test_sessions_;
   std::shared_ptr<TestHttpHealthCheckerImpl> health_checker_;
