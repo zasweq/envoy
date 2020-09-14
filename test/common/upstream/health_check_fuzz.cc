@@ -63,7 +63,7 @@ void HealthCheckFuzz::respondHttp(test::fuzz::Headers headers, absl::string_view
 
   ENVOY_LOG_MISC(trace, "Responded headers");
 
-  //TODO: This can cause client to close, if so create a new one
+  //Responding with http can cause client to close, if so create a new one.
   bool client_will_close = false;
   if (response_headers->Connection()) {
     client_will_close =
@@ -105,9 +105,8 @@ void HealthCheckFuzz::triggerIntervalTimer() {
   test_sessions_[0]->interval_timer_->invokeCallback();
 }
 
-//Note: something wrong with this invokeCallback for interval means the interval timer should be enabled
 void HealthCheckFuzz::triggerTimeoutTimer(bool last_action) {
-  //Timeout timer needs to be explicitly enabled, usually by onIntervalBase()
+  //Timeout timer needs to be explicitly enabled, usually by a call to onIntervalBase().
   if (!test_sessions_[0]->timeout_timer_->enabled_) {
     ENVOY_LOG_MISC(trace, "Timeout timer is disabled. Skipping trigger timeout timer.");
     return;
@@ -146,7 +145,8 @@ void HealthCheckFuzz::raiseEvent(test::common::upstream::RaiseEvent event,
   switch (type_) {
   case HealthCheckFuzz::Type::HTTP: {
     test_sessions_[0]->client_connection_->raiseEvent(eventType);
-    if (!last_action && eventType != Network::ConnectionEvent::Connected) { //TODO: Discuss with Asra, you can either have this hardcoded here or handled in an expect stream create, but I feel like hardcoding would be better in terms of recreating client/stream, as otherwise events would have to cycle until invokeIntervalTimer()  to do anything
+    //TODO: Discuss with Asra/Adi, you can either have this hardcoded here or handled in an expect stream create, but I feel like hardcoding would be better in terms of recreating client/stream, as otherwise events would have to cycle until invokeIntervalTimer() to do anything. This discussion maps to all expectClientCreate() calls.
+    if (!last_action && eventType != Network::ConnectionEvent::Connected) {
       ENVOY_LOG_MISC(trace, "Creating client and stream from close event");
       expectClientCreate(0);
       expectStreamCreate(0);
@@ -169,7 +169,8 @@ void HealthCheckFuzz::replay(test::common::upstream::HealthCheckTestCase input) 
     case test::common::upstream::Action::kRespond: {
       switch (type_) {
       case HealthCheckFuzz::Type::HTTP: {
-        if (event.respond().http_respond().status().empty()) { //TODO: Required because can't documentation about requireds for strings in proto.
+        //TODO: Hardcoded check on status Required because can't find documentation about required validations for strings in protoc-gen-validate.
+        if (event.respond().http_respond().status().empty()) {
           return;
         }
         respondHttp(event.respond().http_respond().headers(),
