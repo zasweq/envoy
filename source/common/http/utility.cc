@@ -26,6 +26,7 @@
 #include "absl/container/node_hash_set.h"
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
+#include "absl/types/optional.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
@@ -369,12 +370,23 @@ std::string Utility::makeSetCookieValue(const std::string& key, const std::strin
 }
 
 uint64_t Utility::getResponseStatus(const ResponseHeaderMap& headers) {
-  const HeaderEntry* header = headers.Status();
-  uint64_t response_code;
-  if (!header || !absl::SimpleAtoi(headers.getStatusValue(), &response_code)) {
+  absl::StatusOr<uint64_t> response_status_or_absl_status = getResponseStatusOr(headers);
+  if (!response_status_or_absl_status.ok()) {
     throw CodecClientException(":status must be specified and a valid unsigned long");
   }
-  return response_code;
+  return response_status_or_absl_status.value();
+}
+
+absl::StatusOr<uint64_t> Utility::getResponseStatusOr(const ResponseHeaderMap& headers) {
+  const HeaderEntry* header = headers.Status();
+  absl::StatusOr<uint64_t> response_status_or_absl_status;
+  uint64_t response_code;
+  if (!header || !absl::SimpleAtoi(headers.getStatusValue(), &response_code)) {
+    response_status_or_absl_status = absl::InvalidArgumentError(":status must be specified and a valid unsigned long");
+    return response_status_or_absl_status;
+  }
+  response_status_or_absl_status = response_code;
+  return response_status_or_absl_status;
 }
 
 bool Utility::isUpgrade(const RequestOrResponseHeaderMap& headers) {

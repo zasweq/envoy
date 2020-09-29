@@ -108,7 +108,7 @@ public:
    * @param headers supplies the header map to encode.
    * @param end_stream supplies whether this is a header only request.
    */
-  virtual void encodeHeaders(const RequestHeaderMap& headers, bool end_stream) PURE;
+  virtual void encodeHeaders(const RequestHeaderMap& headers, bool end_stream);
 
   /**
    * Encode trailers. This implicitly ends the stream.
@@ -135,7 +135,7 @@ public:
    * @param headers supplies the header map to encode.
    * @param end_stream supplies whether this is a header only response.
    */
-  virtual void encodeHeaders(const ResponseHeaderMap& headers, bool end_stream) PURE;
+  virtual Status encodeHeaders(const ResponseHeaderMap& headers, bool end_stream);
 
   /**
    * Encode trailers. This implicitly ends the stream.

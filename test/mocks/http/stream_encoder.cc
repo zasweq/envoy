@@ -12,10 +12,11 @@ MockHttp1StreamEncoderOptions::~MockHttp1StreamEncoderOptions() = default;
 MockRequestEncoder::MockRequestEncoder() {
   ON_CALL(*this, getStream()).WillByDefault(ReturnRef(stream_));
   ON_CALL(*this, encodeHeaders(_, _))
-      .WillByDefault(Invoke([](const RequestHeaderMap& headers, bool) {
+      .WillByDefault(Invoke([](const RequestHeaderMap& headers, bool) -> Status {
         // Check to see that method is not-null. Path can be null for CONNECT and authority can be
         // null at the codec level.
         ASSERT_NE(nullptr, headers.Method());
+        return okStatus();
       }));
 }
 MockRequestEncoder::~MockRequestEncoder() = default;

@@ -377,6 +377,7 @@ envoy_cc_library(
         ":header_map_lib",
         ":headers_lib",
         ":message_lib",
+        "//source/common/common:statusor_lib",
         "//include/envoy/http:codes_interface",
         "//include/envoy/http:filter_interface",
         "//include/envoy/http:header_map_interface",

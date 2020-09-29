@@ -132,7 +132,7 @@ public:
 
   // Http::ResponseEncoder
   void encode100ContinueHeaders(const ResponseHeaderMap& headers) override;
-  void encodeHeaders(const ResponseHeaderMap& headers, bool end_stream) override;
+  Status encodeHeaders(const ResponseHeaderMap& headers, bool end_stream) override;
   void encodeTrailers(const ResponseTrailerMap& trailers) override { encodeTrailersBase(trailers); }
 
   bool streamErrorOnInvalidHttpMessage() const override {

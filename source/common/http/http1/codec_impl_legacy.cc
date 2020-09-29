@@ -340,12 +340,16 @@ const Network::Address::InstanceConstSharedPtr& StreamEncoderImpl::connectionLoc
 static const char RESPONSE_PREFIX[] = "HTTP/1.1 ";
 static const char HTTP_10_RESPONSE_PREFIX[] = "HTTP/1.0 ";
 
-void ResponseEncoderImpl::encodeHeaders(const ResponseHeaderMap& headers, bool end_stream) {
+Status ResponseEncoderImpl::encodeHeaders(const ResponseHeaderMap& headers, bool end_stream) {
   started_response_ = true;
 
   // The contract is that client codecs must ensure that :status is present.
   ASSERT(headers.Status() != nullptr);
-  uint64_t numeric_status = Utility::getResponseStatus(headers);
+  auto response_status_or_absl_status = Http::Utility::getResponseStatusOr(headers);
+  if (!response_status_or_absl_status.ok()) {
+    return codecClientError(response_status_or_absl_status.status().message());
+  }
+  const uint64_t numeric_status = response_status_or_absl_status.value();
 
   if (connection_.protocol() == Protocol::Http10 && connection_.supportsHttp10()) {
     connection_.copyToBuffer(HTTP_10_RESPONSE_PREFIX, sizeof(HTTP_10_RESPONSE_PREFIX) - 1);
@@ -368,6 +372,7 @@ void ResponseEncoderImpl::encodeHeaders(const ResponseHeaderMap& headers, bool e
   }
 
   encodeHeadersBase(headers, absl::make_optional<uint64_t>(numeric_status), end_stream);
+  return okStatus();
 }
 
 static const char REQUEST_POSTFIX[] = " HTTP/1.1\r\n";
