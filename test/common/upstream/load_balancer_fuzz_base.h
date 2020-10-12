@@ -1,5 +1,8 @@
 #include "envoy/config/cluster/v3/cluster.pb.h"
 
+#include <vector>
+#include <unordered_map>
+
 #include "common/upstream/load_balancer_impl.h"
 
 #include "test/common/upstream/load_balancer_fuzz.pb.validate.h"
@@ -22,7 +25,7 @@ public:
 
   // Untrusted upstreams don't have the ability to change the host set size, so keep it constant
   // over the fuzz iteration.
-  void initializeASingleHostSet(uint32_t num_hosts_in_host_set, uint8_t index_of_host_set);
+  void initializeASingleHostSet(test::common::upstream::SetupHostSet setup_host_set, uint8_t index_of_host_set);
 
   // Initializes load balancer components shared amongst every load balancer, random_, and
   // priority_set_
@@ -52,6 +55,13 @@ public:
   // There are used to construct the priority set at the beginning of the fuzz iteration
   uint16_t port_ = 80;
   uint8_t num_host_sets_ = 0;
+
+
+  //These are used when updating health flags - making sure the health flags are updated for correct locality
+  //Each element of vector corresponds to each priority level
+  //std::vector<std::unordered_set<uint8_t>> locality_indexes_;
+  //Key - index of host, value - locality level host at index is in
+  std::unordered_map<uint8_t, uint8_t> locality_indexes_;
 };
 
 } // namespace Upstream

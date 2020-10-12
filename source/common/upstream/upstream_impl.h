@@ -267,6 +267,9 @@ public:
 
   bool hasLocalLocality() const override { return local_; }
   const std::vector<HostVector>& get() const override { return hosts_per_locality_; }
+  
+  //For testing
+  std::vector<HostVector>& getHostVector() const { return hosts_per_locality_; }
   std::vector<HostsPerLocalityConstSharedPtr>
   filter(const std::vector<std::function<bool(const Host&)>>& predicate) const override;
 

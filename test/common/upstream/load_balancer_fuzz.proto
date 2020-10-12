@@ -27,6 +27,16 @@ message LbAction {
   }
 }
 
+message SetupHostSet {
+  uint32 num_hosts_in_host_set = 1;
+  //Doesn't need a cap, as subset utility class handles "overflowing" subsets
+  uint32 num_hosts_locality_one = 2;
+  uint32 num_hosts_locality_two = 3;
+  uint32 num_hosts_locality_three = 4; //Hard cap at 3 localities for simplicity
+  //For choosing which hosts go in which locality
+  bytes random_bytestring = 5 [(validate.rules).bytes = {min_len: 1, max_len: 256}];
+}
+
 // This message represents what LoadBalancerFuzzBase will interact with, performing setup of host sets and calling into load balancers.
 // The logic that this message represents and the base class for load balancing fuzzing will be logic that maps to all types of load balancing
 // and can be used in a modular way at the highest level for each load balancer.
@@ -36,7 +46,7 @@ message LoadBalancerTestCase {
   repeated LbAction actions = 2;
 
   // TODO: Localities
-  repeated uint32 num_hosts_in_host_set = 3
+  repeated SetupHostSet setup_host_sets = 3
       [(validate.rules).repeated = {min_items: 1, max_items: 20}];
 
   // This number is used to instantiate the prng. The prng takes the place of random() calls, allowing a representative random distribution which is also deterministic.
