@@ -7,7 +7,7 @@ namespace Upstream {
 
 namespace {
 
-constexpr uint32_t MaxNumHostsPerPriorityLevel = 256;
+constexpr uint32_t MaxNumHostsPerPriorityLevel = 10000;
 
 } // namespace
 
@@ -19,7 +19,7 @@ void LoadBalancerFuzzBase::initializeASingleHostSet(
                  num_hosts_in_priority_level);
   MockHostSet& host_set = *priority_set_.getMockHostSet(priority_level);
   uint32_t hosts_made = 0;
-  // Cap each host set at 256 hosts for efficiency - Leave port clause in for future changes
+  // Cap each host set at 10000 hosts for efficiency - Leave port clause in for future changes
   while (hosts_made < std::min(num_hosts_in_priority_level, MaxNumHostsPerPriorityLevel) &&
          port_ < 65535) {
     host_set.hosts_.push_back(makeTestHost(info_, "tcp://127.0.0.1:" + std::to_string(port_)));
@@ -27,9 +27,9 @@ void LoadBalancerFuzzBase::initializeASingleHostSet(
     ++hosts_made;
   }
 
-  Fuzz::ProperSubsetSelector subset_selector(setup_priority_level.random_bytestring());
+  Fuzz::ProperSubsetSelector32 subset_selector(setup_priority_level.random_bytestring());
 
-  const std::vector<std::vector<uint8_t>> localities = subset_selector.constructSubsets(
+  const std::vector<std::vector<uint32_t>> localities = subset_selector.constructSubsets(
       {setup_priority_level.num_hosts_locality_a(), setup_priority_level.num_hosts_locality_b(),
        setup_priority_level.num_hosts_locality_c()},
       std::min(num_hosts_in_priority_level, MaxNumHostsPerPriorityLevel));
@@ -41,7 +41,7 @@ void LoadBalancerFuzzBase::initializeASingleHostSet(
   std::array<HostVector, 3> locality_indexes = {locality_a, locality_b, locality_c};
 
   for (uint8_t locality = 0; locality < locality_indexes.size(); locality++) {
-    for (uint8_t index : localities[locality]) {
+    for (uint32_t index : localities[locality]) {
       locality_indexes[locality].push_back(host_set.hosts_[index]);
       locality_indexes_[index] = locality;
     }
@@ -86,13 +86,13 @@ void LoadBalancerFuzzBase::updateHealthFlagsForAHostSet(const uint64_t host_prio
   host_set.degraded_hosts_.clear();
   host_set.excluded_hosts_.clear();
 
-  Fuzz::ProperSubsetSelector subset_selector(random_bytestring);
+  Fuzz::ProperSubsetSelector32 subset_selector(random_bytestring);
 
-  const std::vector<std::vector<uint8_t>> subsets = subset_selector.constructSubsets(
+  const std::vector<std::vector<uint32_t>> subsets = subset_selector.constructSubsets(
       {num_healthy_hosts, num_degraded_hosts, num_excluded_hosts}, host_set_size);
 
   // Healthy hosts are first subset
-  for (uint8_t index : subsets.at(0)) {
+  for (uint32_t index : subsets.at(0)) {
     host_set.healthy_hosts_.push_back(host_set.hosts_[index]);
     // No health flags for healthy
   }
@@ -100,7 +100,7 @@ void LoadBalancerFuzzBase::updateHealthFlagsForAHostSet(const uint64_t host_prio
                  absl::StrJoin(subsets.at(0), " "));
 
   // Degraded hosts are second subset
-  for (uint8_t index : subsets.at(1)) {
+  for (uint32_t index : subsets.at(1)) {
     host_set.degraded_hosts_.push_back(host_set.hosts_[index]);
     // Health flags are not currently directly used by most load balancers, but
     // they may be added and also are used by other components.
@@ -112,7 +112,7 @@ void LoadBalancerFuzzBase::updateHealthFlagsForAHostSet(const uint64_t host_prio
                  absl::StrJoin(subsets.at(1), " "));
 
   // Excluded hosts are third subset
-  for (uint8_t index : subsets.at(2)) {
+  for (uint32_t index : subsets.at(2)) {
     host_set.excluded_hosts_.push_back(host_set.hosts_[index]);
     // Health flags are not currently directly used by most load balancers, but
     // they may be added and also are used by other components.
@@ -138,8 +138,8 @@ void LoadBalancerFuzzBase::updateHealthFlagsForAHostSet(const uint64_t host_prio
 
   // Iterate through subsets
   for (uint8_t health_flag = 0; health_flag < locality_health_flags.size(); health_flag++) {
-    for (uint8_t index : subsets.at(health_flag)) { // Each subset logically represents a health
-                                                    // flag
+    for (uint32_t index : subsets.at(health_flag)) { // Each subset logically represents a health
+                                                     // flag
       // If the host is in a locality, we have to update the corresponding health flag host vector
       if (!(locality_indexes_.find(index) == locality_indexes_.end())) {
         // After computing the host index subsets, we want to propagate these changes to a host set
