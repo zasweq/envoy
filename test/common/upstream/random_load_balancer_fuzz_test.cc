@@ -30,6 +30,8 @@ DEFINE_PROTO_FUZZER(const test::common::upstream::RandomLoadBalancerTestCase& in
   }
 
   load_balancer_fuzz.replay(input.load_balancer_test_case().actions());
+  // Clear the static hosts health flags to prepare for the next iteration
+  load_balancer_fuzz.clearStaticHostsHealthFlags();
 }
 
 } // namespace Upstream

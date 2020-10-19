@@ -32,14 +32,14 @@ actions {
     }
 }
 setup_priority_levels {
-    num_hosts_in_priority_level: 10000
+    num_hosts_in_priority_level: 3000
     num_hosts_locality_a: 500
     num_hosts_locality_b: 50
     num_hosts_locality_c: 5
     random_bytestring: "dsfawetfawertfrawawetukyfyguukytfufrrawer"
 }
 setup_priority_levels {
-    num_hosts_in_priority_level: 10000
+    num_hosts_in_priority_level: 3000
     num_hosts_locality_a: 500
     num_hosts_locality_b: 50
     num_hosts_locality_c: 5
